@@ -224,6 +224,9 @@ function render(){
   }
 
   if(screen==="join"){
+    // Don't rebuild the join screen if it's already showing — that would
+    // wipe whatever the user is typing in the nickname box on every poll.
+    if(document.getElementById("nick")) return;
     app.innerHTML = `
       <div style="font-size:64px;margin-top:30px">🎃</div>
       <h1>Halloween Trivia</h1>
@@ -315,3 +318,4 @@ if(ready){ subscribe(); } render();
 </script>
 </body>
 </html>
+
