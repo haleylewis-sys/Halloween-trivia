@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Halloween Trivia 🎃</title>
+<style>
+  :root{
+    --ink:#0d0518; --panel:rgba(255,255,255,.06); --panel-border:rgba(255,122,24,.28);
+    --pumpkin:#ff7a18; --amber:#f5a623; --lav:#c9b8e8; --mute:#8a7aa8;
+    --green:#17bf63; --red:#e0245e; --blue:#1d9bf0;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    min-height:100vh;
+    background:radial-gradient(ellipse at top,#2d1b4e 0%,#1a0b2e 55%,#0d0518 100%);
+    color:#fff;font-family:'Trebuchet MS',system-ui,-apple-system,sans-serif;
+    display:flex;flex-direction:column;align-items:center;
+    padding:20px 16px 48px;
+  }
+  h1{font-size:34px;margin:8px 0 4px;text-align:center;text-shadow:0 0 18px var(--pumpkin)}
+  .sub{color:var(--lav);margin-top:0;text-align:center}
+  .card{background:var(--panel);border:1px solid var(--panel-border);border-radius:18px;padding:24px;width:100%;max-width:400px;margin-top:22px}
+  label{font-size:14px;color:var(--amber);font-weight:700}
+  input{width:100%;margin-top:8px;padding:14px 16px;border-radius:12px;border:none;font-size:18px;background:#fff;color:var(--ink);outline:none}
+  button{font-family:inherit}
+  .btn{width:100%;margin-top:18px;padding:15px;border-radius:12px;border:none;color:#fff;font-size:18px;font-weight:800;cursor:pointer;box-shadow:0 4px 0 rgba(0,0,0,.3)}
+  .btn:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.3)}
+  .note{color:var(--mute);font-size:12px;margin-top:22px;max-width:360px;text-align:center;line-height:1.55}
+  .row{display:flex;justify-content:space-between;align-items:center;width:100%;max-width:620px}
+  .tag{font-size:12px;color:var(--lav)}
+  .bar{width:100%;max-width:620px;height:8px;background:rgba(255,255,255,.1);border-radius:8px;margin-top:8px;overflow:hidden}
+  .fill{height:100%;transition:width .2s linear}
+  .timer{font-size:44px;font-weight:800;margin:10px 0}
+  .clue{background:rgba(255,255,255,.08);border-radius:16px;padding:24px 20px;width:100%;max-width:620px;text-align:center;min-height:80px;display:flex;align-items:center;justify-content:center;line-height:1.3;font-weight:700}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:620px;margin-top:16px}
+  .opt{color:#fff;border:none;border-radius:14px;padding:20px 14px;font-size:17px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:10px;text-align:left;box-shadow:0 4px 0 rgba(0,0,0,.25)}
+  .opt:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.25)}
+  .lb-item{display:flex;justify-content:space-between;padding:8px 12px;border-radius:10px;margin-bottom:5px;background:rgba(255,255,255,.05)}
+  .lb-me{background:rgba(255,122,24,.25)!important}
+  .hidden{display:none}
+  .center{display:flex;flex-direction:column;align-items:center}
+</style>
+</head>
+<body>
+<div id="app" class="center" style="width:100%"><p style="margin-top:40px">Loading… 🕸️</p></div>
+
+<!-- Firebase (compat build = no bundler needed) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<script>
+/* ============================================================
+   1) PASTE YOUR FIREBASE CONFIG BELOW
+   Replace every "PASTE_..." value with the values Firebase
+   gives you (Project settings → Your apps → SDK setup).
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyALF5Ljuwm5d02rp_3xTUuT8eegmSzdPw0",
+  authDomain: "halloween-trivia-44a17.firebaseapp.com",
+  projectId: "halloween-trivia-44a17",
+  storageBucket: "halloween-trivia-44a17.firebasestorage.app",
+  messagingSenderId: "778986819806",
+  appId: "1:778986819806:web:0c15189ffd965d2734724f"
+};
+/* ============================================================
+   2) OPTIONAL: change the game room name. Everyone in the same
+   room plays together. Use a new name to start a fresh game.
+   ============================================================ */
+const ROOM = "halloween-2026";
+
+// ---- constants ----
+const QUESTION_TIME = 20, REVEAL_TIME = 6, MAX_POINTS = 1000;
+const COLORS = ["#e0245e","#1d9bf0","#f5a623","#17bf63"];
+const SHAPES = ["▲","◆","●","■"];
+
+const QUESTIONS = [
+  {round:"👻 Round 1 — Picture Guessing",clue:"🧙‍♀️🌕🧹",big:true,options:["Witch","Fairy","Angel","Mermaid"],answer:0},
+  {round:"👻 Round 1 — Picture Guessing",clue:"🎃",big:true,options:["Pumpkin pie","Jack-o'-lantern","Orange","Sun"],answer:1},
+  {round:"👻 Round 1 — Picture Guessing",clue:"🏚️👻",big:true,options:["Old barn","Haunted house","Castle","Cabin"],answer:1},
+  {round:"👻 Round 1 — Picture Guessing",clue:"🐈‍⬛",big:true,options:["Panther","Black cat","Bat","Raven"],answer:1},
+  {round:"👻 Round 1 — Picture Guessing",clue:"👻",big:true,options:["Ghost","Cloud","Sheet","Spirit board"],answer:0},
+  {round:"👻 Round 1 — Picture Guessing",clue:"🧛‍♂️🩸",big:true,options:["Zombie","Werewolf","Vampire","Demon"],answer:2},
+  {round:"👻 Round 1 — Picture Guessing",clue:"🧟‍♂️",big:true,options:["Mummy","Zombie","Ghoul","Skeleton"],answer:1},
+  {round:"👻 Round 1 — Picture Guessing",clue:"💀🦴",big:true,options:["Pirate","Skeleton","Grim reaper","Fossil"],answer:1},
+  {round:"👻 Round 1 — Picture Guessing",clue:"🕷️🕸️",big:true,options:["Cobweb corner","Spider web","Net","Trap"],answer:1},
+  {round:"👻 Round 1 — Picture Guessing",clue:"🧙‍♀️🍎",big:true,options:["Good witch","Evil witch / Snow White's witch","Apple farmer","Fortune teller"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🍬 + 🌽",big:true,options:["Sweet corn","Candy corn","Corn candy","Kettle corn"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🩸 + 🌙",big:true,options:["Red moon","Blood moon","Night blood","Crimson sky"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🕷️ + 🕸️",big:true,options:["Spider trap","Spider web","Web spinner","Cobweb"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🎃 + 🥧",big:true,options:["Pumpkin pie","Squash tart","Gourd cake","Harvest pie"],answer:0},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🪦 + 🏡",big:true,options:["Tomb house","Graveyard","Cemetery home","Crypt"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🐝 + 🧙‍♀️  (say each out loud)",big:true,options:["Beelady","Bewitch","Beespell","Buzzcraft"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"👂 + 👁️  (EAR + EYE)",big:true,options:["Weird","Eerie","Creepy","Uneasy"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"😴 + 🐴  (NIGHT + MARE)",big:true,options:["Nighthorse","Nightmare","Dreammare","Sleepsteed"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🐺 + 🌕",big:true,options:["Moon wolf","Werewolf","Wolf moon","Lunar hound"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🎃 + 🏮  (JACK + LANTERN)",big:true,options:["Pumpkin lamp","Jack-o'-lantern","Gourd light","Harvest lantern"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🐝 + 🧊 + 🧙‍♀️  (BEE+WITCH+ING)",big:true,options:["Bewitching","Beewitchy","Icewitch","Chillspell"],answer:0},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🕷️ + 👨",big:true,options:["Bug man","Spider-Man","Web guy","Arachno"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🧛 + 🦇",big:true,options:["Night bat","Vampire bat","Blood wing","Dracula bat"],answer:1},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🕯️ + 🧟",big:true,options:["Candle zombie","Wax walker","Light corpse","Flame ghoul"],answer:0},
+  {round:"🧡 Round 2 — Emoji Word Puzzles",clue:"🧙‍♀️ + 🧪 + 📖  (WITCH + CRAFT)",big:true,options:["Spellbook","Witchcraft","Potion lore","Magic craft"],answer:1},
+  {round:"🧠 Round 3 — Halloween Trivia",clue:"What ancient Celtic festival is a predecessor to Halloween?",options:["Yule","Samhain","Beltane","Imbolc"],answer:1},
+  {round:"🧠 Round 3 — Halloween Trivia",clue:"What vegetable was originally used to make jack-o'-lanterns?",options:["Potato","Turnip","Carrot","Beet"],answer:1},
+  {round:"🧠 Round 3 — Halloween Trivia",clue:"What does the word \"Halloween\" come from?",options:["Hallows' Eve","Harvest Evening","Hallow Moon","Holy Night"],answer:0},
+  {round:"🧠 Round 3 — Halloween Trivia",clue:"Which country popularized Halloween in North America?",options:["England","France","Ireland","Germany"],answer:2},
+  {round:"🧠 Round 3 — Halloween Trivia",clue:"What is a group of witches called?",options:["A spell","A coven","A gathering","A circle"],answer:1},
+  {round:"🧠 Round 3 — Halloween Trivia",clue:"What is the fear of Halloween called?",options:["Samhainophobia","Halloweenophobia","Phasmophobia","Necrophobia"],answer:0},
+  {round:"🧠 Round 3 — Halloween Trivia",clue:"How many bones are in the adult human body?",options:["201","206","210","216"],answer:1},
+  {round:"🧠 Round 3 — Halloween Trivia",clue:"Which animal is most traditionally associated with witches?",options:["Raven","Owl","Black cat","Bat"],answer:2},
+  {round:"🧠 Round 3 — Halloween Trivia",clue:"What colors are most traditionally associated with Halloween?",options:["Red and black","Purple and green","Orange and black","Orange and purple"],answer:2},
+  {round:"🧠 Round 3 — Halloween Trivia",clue:"Which creature transforms during a full moon?",options:["Vampire","Zombie","Werewolf","Mummy"],answer:2},
+  {round:"🎬 Round 4 — Movies & Pop Culture",clue:"In Hocus Pocus, what is the sisters' last name?",options:["Sanderson","Salem","Spellman","Blackwood"],answer:0},
+  {round:"🎬 Round 4 — Movies & Pop Culture",clue:"Jack Skellington's dog in The Nightmare Before Christmas?",options:["Bones","Zero","Ghost","Shadow"],answer:1},
+  {round:"🎬 Round 4 — Movies & Pop Culture",clue:"The masked killer in the Halloween franchise?",options:["Jason Voorhees","Freddy Krueger","Michael Myers","Ghostface"],answer:2},
+  {round:"🎬 Round 4 — Movies & Pop Culture",clue:"Which movie has the line \"I see dead people\"?",options:["The Exorcist","The Sixth Sense","Insidious","The Conjuring"],answer:1},
+  {round:"🎬 Round 4 — Movies & Pop Culture",clue:"Wednesday Addams' brother's name?",options:["Gomez","Fester","Pugsley","Thing"],answer:2},
+];
+
+// ---- init firebase ----
+let db, gameRef, playersRef, ready=false;
+try {
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+  gameRef = db.collection("rooms").doc(ROOM);
+  playersRef = gameRef.collection("players");
+  ready = true;
+} catch(e){ console.error(e); }
+
+// ---- local state ----
+let me = { id:"", name:"", isHost:false };
+let game = null;           // {phase,qIndex,phaseStart}
+let players = {};          // id -> {name,score,isHost,answers}
+let myAnswer = null;       // {choice}
+let screen = "join";
+const app = document.getElementById("app");
+const nowMs = () => Date.now();
+
+// ---- firestore listeners ----
+function subscribe(){
+  gameRef.onSnapshot(d=>{ game = d.exists ? d.data() : null; render(); });
+  playersRef.onSnapshot(s=>{
+    players = {}; s.forEach(doc=> players[doc.id]=doc.data()); render();
+  });
+}
+
+// ---- host loop (only host advances the clock) ----
+setInterval(()=>{
+  render(); // keep timer ticking
+  if(!me.isHost || !game) return;
+  if(game.phase==="lobby" || game.phase==="ended") return;
+  const el = (nowMs() - game.phaseStart)/1000;
+  if(game.phase==="question" && el>=QUESTION_TIME){
+    gameRef.update({phase:"reveal",phaseStart:nowMs()});
+  } else if(game.phase==="reveal" && el>=REVEAL_TIME){
+    const next = game.qIndex+1;
+    if(next>=QUESTIONS.length) gameRef.update({phase:"ended",phaseStart:nowMs()});
+    else gameRef.update({phase:"question",qIndex:next,phaseStart:nowMs()});
+  }
+},250);
+
+// ---- actions ----
+async function joinGame(){
+  const name = document.getElementById("nick").value.trim();
+  if(!name) return;
+  me.id = "p_"+Math.random().toString(36).slice(2,9);
+  me.name = name;
+  const snap = await playersRef.get();
+  me.isHost = snap.empty;
+  await playersRef.doc(me.id).set({name,score:0,isHost:me.isHost,answers:{}});
+  const g = await gameRef.get();
+  if(me.isHost && !g.exists){
+    await gameRef.set({phase:"lobby",qIndex:0,phaseStart:nowMs()});
+  }
+  screen="lobby"; render();
+}
+async function startGame(){ await gameRef.update({phase:"question",qIndex:0,phaseStart:nowMs()}); }
+async function submitAnswer(choice){
+  if(myAnswer) return;
+  myAnswer = {choice};
+  const el = (nowMs()-game.phaseStart)/1000;
+  const q = QUESTIONS[game.qIndex];
+  const correct = choice===q.answer;
+  let earned = 0;
+  if(correct){ const frac=Math.max(0,1-el/QUESTION_TIME); earned=Math.round(MAX_POINTS*(0.5+0.5*frac)); }
+  const meDoc = players[me.id]||{score:0,answers:{}};
+  const answers = Object.assign({}, meDoc.answers, {[game.qIndex]:{choice,correct,earned}});
+  await playersRef.doc(me.id).update({score:(meDoc.score||0)+earned, answers});
+  render();
+}
+async function resetGame(){
+  const snap = await playersRef.get();
+  const batch = db.batch();
+  snap.forEach(d=>batch.delete(d.ref));
+  await batch.commit();
+  await gameRef.set({phase:"lobby",qIndex:0,phaseStart:nowMs()});
+  me={id:"",name:"",isHost:false}; myAnswer=null; screen="join"; render();
+}
+
+// reset myAnswer on new question
+let lastQ = -1, lastPhase="";
+function syncAnswerState(){
+  if(game && game.phase==="question" && game.qIndex!==lastQ){
+    lastQ = game.qIndex;
+    const ex = players[me.id]?.answers?.[game.qIndex];
+    myAnswer = ex ? {choice:ex.choice} : null;
+  }
+}
+
+// ---- render ----
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function sorted(){return Object.entries(players).map(([id,v])=>({id,...v})).sort((a,b)=>(b.score||0)-(a.score||0));}
+
+function render(){
+  if(!ready){ app.innerHTML = `<div class="card"><p style="color:#e0245e">⚠️ Firebase isn't configured yet. Paste your config into index.html.</p></div>`; return; }
+  syncAnswerState();
+
+  // decide screen from game phase
+  if(game){
+    if((game.phase==="question"||game.phase==="reveal") && screen==="lobby") screen="play";
+    if(game.phase==="ended") screen="end";
+    if(game.phase==="lobby" && screen==="play") screen="lobby";
+  }
+
+  if(screen==="join"){
+    app.innerHTML = `
+      <div style="font-size:64px;margin-top:30px">🎃</div>
+      <h1>Halloween Trivia</h1>
+      <p class="sub">Spooky Team Challenge · buzzer-style</p>
+      <div class="card">
+        <label for="nick">Enter your nickname</label>
+        <input id="nick" maxlength="20" placeholder="e.g. Resting Witch Face" />
+        <button class="btn" style="background:var(--pumpkin)" onclick="joinGame()">Join Game 👻</button>
+      </div>
+      <p class="note">Everyone opens this same link to join. The first player to join hosts the game and starts it.</p>`;
+    const i=document.getElementById("nick"); if(i){i.focus(); i.onkeydown=e=>{if(e.key==="Enter")joinGame();};}
+    return;
+  }
+
+  if(screen==="lobby"){
+    const list = sorted().map(p=>`<div class="lb-item ${p.id===me.id?'lb-me':''}"><span>${p.isHost?'👑 ':'🎃 '}${esc(p.name)}</span>${p.id===me.id?'<span style="color:var(--amber);font-size:12px">you</span>':''}</div>`).join("");
+    app.innerHTML = `
+      <div style="font-size:48px;margin-top:20px">🕸️</div>
+      <h1 style="font-size:26px">Lobby</h1>
+      <p class="sub">${me.isHost?"You're the host.":"Waiting for the host to start…"}</p>
+      <div class="card">
+        <div style="font-size:13px;color:var(--amber);font-weight:700;margin-bottom:8px">Players joined (${sorted().length})</div>
+        ${list||'<p class="sub">No one yet…</p>'}
+      </div>
+      ${me.isHost?`<button class="btn" style="background:var(--green);max-width:400px" onclick="startGame()">Start Game (${QUESTIONS.length} questions)</button>`:""}
+      <p class="note">New players can still join until the game starts.</p>`;
+    return;
+  }
+
+  if(screen==="play" && game){
+    const q = QUESTIONS[game.qIndex];
+    const el = (nowMs()-game.phaseStart)/1000;
+
+    if(game.phase==="question"){
+      const remaining = Math.max(0,Math.ceil(QUESTION_TIME-el));
+      const pct = (remaining/QUESTION_TIME)*100;
+      const answered = !!myAnswer;
+      app.innerHTML = `
+        <div class="row" style="margin-top:8px"><span class="tag">${esc(q.round)}</span><span class="tag">Q${game.qIndex+1}/${QUESTIONS.length}</span></div>
+        <div class="bar"><div class="fill" style="width:${pct}%;background:${remaining<=5?'var(--red)':'var(--green)'}"></div></div>
+        <div class="timer" style="color:${remaining<=5?'var(--red)':'#fff'}">${remaining}</div>
+        <div class="clue" style="font-size:${q.big?'40px':'22px'}">${esc(q.clue)}</div>
+        ${answered
+          ? `<div style="margin-top:24px;font-size:20px;color:var(--amber);text-align:center">🔒 Answer locked in!<br><span style="font-size:14px;color:var(--lav)">Waiting for the timer…</span></div>`
+          : `<div class="grid">${q.options.map((o,i)=>`<button class="opt" style="background:${COLORS[i]}" onclick="submitAnswer(${i})"><span style="font-size:20px">${SHAPES[i]}</span>${esc(o)}</button>`).join("")}</div>`}`;
+      return;
+    }
+
+    if(game.phase==="reveal"){
+      const mine = players[me.id]?.answers?.[game.qIndex];
+      const head = mine ? (mine.correct?"✅ Correct!":"❌ Not quite") : "⏰ Time's up";
+      const lb = sorted().slice(0,8).map((p,i)=>`<div class="lb-item ${p.id===me.id?'lb-me':''}"><span>${["🥇","🥈","🥉"][i]||(i+1)+"."} ${esc(p.name)}</span><span style="font-weight:700">${p.score||0}</span></div>`).join("");
+      app.innerHTML = `
+        <span class="tag" style="margin-top:8px">Q${game.qIndex+1}/${QUESTIONS.length}</span>
+        <div style="font-size:30px;margin:12px 0;text-align:center;font-weight:800">${head}</div>
+        ${mine&&mine.correct?`<div style="color:var(--green);font-size:22px;font-weight:700">+${mine.earned} pts</div>`:""}
+        <div style="background:rgba(23,191,99,.15);border:2px solid var(--green);border-radius:14px;padding:14px 20px;margin-top:14px;max-width:560px;text-align:center">
+          <span style="font-size:13px;color:#8affc0">Answer</span><br><span style="font-size:22px;font-weight:800">${SHAPES[q.answer]} ${esc(q.options[q.answer])}</span>
+        </div>
+        <div style="width:100%;max-width:420px;margin-top:24px">
+          <div style="font-size:13px;color:var(--amber);font-weight:700;margin-bottom:8px">🏆 Leaderboard</div>${lb}
+        </div>`;
+      return;
+    }
+  }
+
+  if(screen==="end"){
+    const titles=["🥇 The Halloween Mastermind","🥈 The Spooky Scholar","🥉 The Pumpkin Professor"];
+    const rows = sorted().map((p,i)=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-radius:14px;margin-bottom:8px;background:${i<3?'rgba(255,122,24,.2)':'rgba(255,255,255,.05)'};border:${p.id===me.id?'2px solid var(--pumpkin)':'2px solid transparent'}">
+        <div><div style="font-size:16px;font-weight:700">${titles[i]||((i+1)+". "+esc(p.name))}</div>${titles[i]?`<div style="font-size:13px;color:var(--lav)">${esc(p.name)}</div>`:""}</div>
+        <span style="font-size:20px;font-weight:800;color:var(--amber)">${p.score||0}</span>
+      </div>`).join("");
+    app.innerHTML = `
+      <div style="font-size:60px;margin-top:20px">🏆</div>
+      <h1>Final Results</h1>
+      <div style="width:100%;max-width:440px;margin-top:12px">${rows}</div>
+      ${me.isHost?`<button class="btn" style="background:var(--red);max-width:440px" onclick="resetGame()">Reset for a New Game</button>`:""}
+      <p class="note">Happy Halloween! 🎃👻</p>`;
+    return;
+  }
+
+  app.innerHTML = `<p style="margin-top:40px">Loading… 🕸️</p>`;
+}
+
+// expose handlers + go
+window.joinGame=joinGame; window.startGame=startGame; window.submitAnswer=submitAnswer; window.resetGame=resetGame;
+if(ready){ subscribe(); } render();
+</script>
+</body>
+</html>
