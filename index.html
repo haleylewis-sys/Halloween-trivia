@@ -53,6 +53,8 @@
   .p-name{background:rgba(255,122,24,.2);border:1px solid var(--panel-border);border-radius:999px;padding:10px 18px;font-size:20px;font-weight:700}
   .p-lb{width:100%;max-width:640px;margin-top:20px}
   .p-lb .lb-item{font-size:22px;padding:12px 18px}
+  #hostReset{position:fixed;top:14px;right:14px;z-index:50;background:rgba(224,36,94,.9);color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 3px 0 rgba(0,0,0,.3)}
+  #hostReset:active{transform:translateY(2px);box-shadow:0 1px 0 rgba(0,0,0,.3)}
 </style>
 </head>
 <body>
@@ -60,6 +62,7 @@
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
 <script>
 /* ============================================================
@@ -82,6 +85,20 @@ const IS_HOST = new URLSearchParams(location.search).has("host");
 const QUESTION_TIME = 20, REVEAL_TIME = 6, MAX_POINTS = 1000;
 const COLORS = ["#e0245e","#1d9bf0","#f5a623","#17bf63"];
 const SHAPES = ["▲","◆","●","■"];
+
+// --- Halloween avatars: 10 emoji x 10 background colors = 100 unique combos ---
+const AV_EMOJI = ["🎃","👻","🧛","🧟","🦇","🕷️","🐈‍⬛","💀","🧙‍♀️","🕸️"];
+const AV_BG = ["#ff7a18","#8a3ffc","#17bf63","#e0245e","#1d9bf0","#f5a623","#c9457a","#00b3a4","#7b61ff","#d94f2b"];
+function avatarFor(n){
+  const i = ((n%100)+100)%100;           // wrap every 100, keep positive
+  const emoji = AV_EMOJI[i % 10];
+  const bg = AV_BG[Math.floor(i/10) % 10];
+  return {emoji,bg};
+}
+function avatarHTML(n,size){
+  const a = avatarFor(n); const s = size||44;
+  return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${s}px;height:${s}px;border-radius:50%;background:${a.bg};font-size:${Math.round(s*0.58)}px;box-shadow:0 2px 6px rgba(0,0,0,.35);flex:0 0 auto">${a.emoji}</span>`;
+}
 
 const QUESTIONS = [
   {round:"👻 Round 1 — Picture Guessing",clue:"🧙‍♀️🌕🧹",big:true,options:["Witch","Fairy","Angel","Mermaid"],answer:0},
@@ -175,7 +192,10 @@ async function joinGame(){
   me.id = "p_"+Math.random().toString(36).slice(2,9);
   me.name = name;
   await ensureGameDoc();
-  await playersRef.doc(me.id).set({name,score:0,answers:{}});
+  // avatar number = how many players are already in (join order) → unique up to 100
+  const snap = await playersRef.get();
+  const av = snap.size;
+  await playersRef.doc(me.id).set({name,score:0,answers:{},av});
   screen="lobby"; render();
 }
 async function startGame(){ await gameRef.update({phase:"question",qIndex:0,phaseStart:nowMs()}); }
@@ -192,13 +212,14 @@ async function submitAnswer(choice){
   await playersRef.doc(me.id).update({score:(meDoc.score||0)+earned, answers});
   render();
 }
-async function resetGame(){
+async function resetGame(confirmFirst){
+  if(confirmFirst && !confirm("Reset the game? This removes ALL players and scores and returns everyone to the lobby.")) return;
   const snap = await playersRef.get();
   const batch = db.batch();
   snap.forEach(d=>batch.delete(d.ref));
   await batch.commit();
   await gameRef.set({phase:"lobby",qIndex:0,phaseStart:nowMs()});
-  myAnswer=null; render();
+  myAnswer=null; lastQ=-1; render();
 }
 
 let lastQ = -1;
@@ -214,37 +235,70 @@ function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;","
 function sorted(){return Object.entries(players).map(([id,v])=>({id,...v})).sort((a,b)=>(b.score||0)-(a.score||0));}
 function answeredCount(qi){return Object.values(players).filter(p=>p.answers && p.answers[qi]!==undefined).length;}
 
+// Player link = current URL with ?host and any query string removed
+function playerLink(){ return location.origin + location.pathname; }
+function renderQR(){
+  const box = document.getElementById("qrbox");
+  if(!box || box.childElementCount>0) return; // already has a QR
+  if(typeof QRCode==="undefined"){ box.innerHTML = '<span style="color:#333;font-size:12px;text-align:center">'+esc(playerLink())+'</span>'; return; }
+  try{
+    new QRCode(box, { text: playerLink(), width:188, height:188, correctLevel: QRCode.CorrectLevel.M });
+  }catch(e){ box.innerHTML = '<span style="color:#333;font-size:12px">'+esc(playerLink())+'</span>'; }
+}
+
 // ============ RENDER ============
 function render(){
   if(!ready){ app.innerHTML = `<div class="card"><p style="color:#e0245e">⚠️ Firebase isn't configured.</p></div>`; return; }
   syncAnswerState();
-  if(IS_HOST){ renderHost(); return; }
+  if(IS_HOST){ ensureHostResetButton(); renderHost(); return; }
   renderPlayer();
 }
 
+// Always-visible reset button on the host screen (top-right corner)
+function ensureHostResetButton(){
+  if(document.getElementById("hostReset")) return;
+  const b = document.createElement("button");
+  b.id = "hostReset";
+  b.textContent = "🧹 Reset game";
+  b.onclick = ()=>resetGame(true);
+  document.body.appendChild(b);
+}
+
 // ---------- PRESENTER (big screen) ----------
+let lastLobbySig="";
 function renderHost(){
   const count = Object.keys(players).length;
 
   if(!game || game.phase==="lobby"){
-    const names = sorted().map(p=>`<span class="p-name">🎃 ${esc(p.name)}</span>`).join("");
+    // Only rebuild the lobby DOM when the player list actually changes,
+    // otherwise the QR code would be destroyed and redrawn every poll.
+    const sig = "lobby|"+sorted().map(p=>p.name+":"+(p.av??"")).join(",");
+    if(sig===lastLobbySig){ return; }
+    lastLobbySig = sig;
+    const names = sorted().map(p=>`<span class="p-name" style="display:inline-flex;align-items:center;gap:8px">${avatarHTML(p.av??0,30)}${esc(p.name)}</span>`).join("");
     app.innerHTML = `
       <div class="p-wrap center">
         <div style="font-size:70px;margin-top:10px">🎃</div>
         <h1 style="font-size:44px">Halloween Trivia</h1>
-        <p class="sub" style="font-size:20px">Scan the QR code, pick a nickname, and join on your phone.</p>
-        <div style="margin-top:10px;font-size:22px;color:var(--amber);font-weight:800">Players in: ${count}</div>
+        <p class="sub" style="font-size:20px">Scan to join on your phone</p>
+        <div id="qrbox" style="background:#fff;padding:16px;border-radius:16px;margin-top:14px;width:220px;height:220px;display:flex;align-items:center;justify-content:center"></div>
+        <div style="margin-top:14px;font-size:22px;color:var(--amber);font-weight:800">Players in: ${count}</div>
         <div class="p-name-grid">${names||'<span class="sub">Waiting for players…</span>'}</div>
         <button class="btn" style="background:var(--green);max-width:420px;font-size:22px;margin-top:26px" onclick="startGame()">
           Start Game (${QUESTIONS.length} questions)
         </button>
-        <p class="note">Start whenever everyone's in. New players can join right up until you press Start.</p>
+        <button class="btn" style="background:rgba(255,255,255,.12);max-width:420px;font-size:15px;margin-top:10px" onclick="resetGame(true)">
+          🧹 Reset — clear all players &amp; scores
+        </button>
+        <p class="note">Start whenever everyone's in. New players can join right up until you press Start.<br>Use Reset after a test run to wipe everyone and start fresh.</p>
       </div>`;
+    renderQR();
     return;
   }
 
   const q = QUESTIONS[game.qIndex];
   const elapsed = (nowMs()-game.phaseStart)/1000;
+  lastLobbySig=""; // so lobby rebuilds fresh if we reset back to it later
 
   if(game.phase==="question"){
     const remaining = Math.max(0,Math.ceil(QUESTION_TIME-elapsed));
@@ -261,13 +315,13 @@ function renderHost(){
         <div class="p-grid">
           ${q.options.map((o,i)=>`<div class="p-opt" style="background:${COLORS[i]}"><span>${SHAPES[i]}</span>${esc(o)}</div>`).join("")}
         </div>
-        <p class="note">Answer on your phone — match the shape &amp; color.</p>
+        <p class="note">Answer on your phone — match the shape &amp; color. &nbsp;·&nbsp; <span style="cursor:pointer;text-decoration:underline" onclick="resetGame(true)">Reset game</span></p>
       </div>`;
     return;
   }
 
   if(game.phase==="reveal"){
-    const lb = sorted().slice(0,10).map((p,i)=>`<div class="lb-item"><span>${["🥇","🥈","🥉"][i]||(i+1)+"."} ${esc(p.name)}</span><span style="font-weight:800">${p.score||0}</span></div>`).join("");
+    const lb = sorted().slice(0,10).map((p,i)=>`<div class="lb-item"><span style="display:inline-flex;align-items:center;gap:10px">${["🥇","🥈","🥉"][i]||`<span style="width:24px;display:inline-block;text-align:center">${i+1}.</span>`} ${avatarHTML(p.av??0,32)} ${esc(p.name)}</span><span style="font-weight:800">${p.score||0}</span></div>`).join("");
     app.innerHTML = `
       <div class="p-wrap center">
         <span class="tag">Question ${game.qIndex+1} of ${QUESTIONS.length}</span>
@@ -278,6 +332,7 @@ function renderHost(){
         <div class="p-lb">
           <div style="font-size:18px;color:var(--amber);font-weight:800;margin-bottom:8px">🏆 Leaderboard</div>${lb}
         </div>
+        <p class="note"><span style="cursor:pointer;text-decoration:underline" onclick="resetGame(true)">Reset game</span></p>
       </div>`;
     return;
   }
@@ -286,7 +341,7 @@ function renderHost(){
     const titles=["🥇 The Halloween Mastermind","🥈 The Spooky Scholar","🥉 The Pumpkin Professor"];
     const rows = sorted().map((p,i)=>`
       <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 22px;border-radius:14px;margin-bottom:8px;background:${i<3?'rgba(255,122,24,.2)':'rgba(255,255,255,.05)'}">
-        <div><div style="font-size:20px;font-weight:800">${titles[i]||((i+1)+". "+esc(p.name))}</div>${titles[i]?`<div style="font-size:15px;color:var(--lav)">${esc(p.name)}</div>`:""}</div>
+        <div style="display:flex;align-items:center;gap:14px">${avatarHTML(p.av??0,46)}<div><div style="font-size:20px;font-weight:800">${titles[i]||((i+1)+". "+esc(p.name))}</div>${titles[i]?`<div style="font-size:15px;color:var(--lav)">${esc(p.name)}</div>`:""}</div></div>
         <span style="font-size:24px;font-weight:900;color:var(--amber)">${p.score||0}</span>
       </div>`).join("");
     app.innerHTML = `
@@ -294,7 +349,7 @@ function renderHost(){
         <div style="font-size:64px;margin-top:14px">🏆</div>
         <h1>Final Results</h1>
         <div style="width:100%;max-width:640px;margin-top:12px">${rows}</div>
-        <button class="btn" style="background:var(--red);max-width:420px" onclick="resetGame()">Reset for a New Game</button>
+        <button class="btn" style="background:var(--red);max-width:420px" onclick="resetGame(true)">Reset for a New Game</button>
         <p class="note">Happy Halloween! 🎃👻</p>
       </div>`;
     return;
@@ -326,9 +381,10 @@ function renderPlayer(){
   }
 
   if(screen==="lobby"){
+    const myAv = players[me.id]?.av ?? 0;
     app.innerHTML = `
-      <div style="font-size:48px;margin-top:30px">🕸️</div>
-      <h1 style="font-size:26px">You're in!</h1>
+      <div style="margin-top:34px">${avatarHTML(myAv,90)}</div>
+      <h1 style="font-size:26px;margin-top:14px">You're in!</h1>
       <p class="sub">${esc(me.name)} — watch the big screen.<br>The game starts when the host is ready.</p>
       <div class="card center"><div style="font-size:15px;color:var(--amber)">Waiting for the game to start…</div></div>`;
     return;
