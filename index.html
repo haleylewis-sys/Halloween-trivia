@@ -28,9 +28,9 @@
   .btn{width:100%;margin-top:18px;padding:15px;border-radius:12px;border:none;color:#fff;font-size:18px;font-weight:800;cursor:pointer;box-shadow:0 4px 0 rgba(0,0,0,.3)}
   .btn:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.3)}
   .note{color:var(--mute);font-size:12px;margin-top:22px;max-width:360px;text-align:center;line-height:1.55}
-  .row{display:flex;justify-content:space-between;align-items:center;width:100%;max-width:620px}
-  .tag{font-size:12px;color:var(--lav)}
-  .bar{width:100%;max-width:620px;height:8px;background:rgba(255,255,255,.1);border-radius:8px;margin-top:8px;overflow:hidden}
+  .row{display:flex;justify-content:space-between;align-items:center;width:100%;max-width:900px}
+  .tag{font-size:13px;color:var(--lav)}
+  .bar{width:100%;max-width:900px;height:10px;background:rgba(255,255,255,.1);border-radius:8px;margin-top:8px;overflow:hidden}
   .fill{height:100%;transition:width .2s linear}
   .timer{font-size:44px;font-weight:800;margin:10px 0}
   .clue{background:rgba(255,255,255,.08);border-radius:16px;padding:24px 20px;width:100%;max-width:620px;text-align:center;min-height:80px;display:flex;align-items:center;justify-content:center;line-height:1.3;font-weight:700}
@@ -40,21 +40,30 @@
   .lb-item{display:flex;justify-content:space-between;padding:8px 12px;border-radius:10px;margin-bottom:5px;background:rgba(255,255,255,.05)}
   .lb-me{background:rgba(255,122,24,.25)!important}
   .hidden{display:none}
-  .center{display:flex;flex-direction:column;align-items:center}
+  .center{display:flex;flex-direction:column;align-items:center;width:100%}
+
+  /* Presenter (big screen) styles */
+  .p-wrap{max-width:1000px;width:100%}
+  .p-clue{font-size:clamp(28px,4vw,52px);font-weight:800;text-align:center;line-height:1.25;margin:18px 0}
+  .p-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;width:100%;max-width:900px;margin-top:10px}
+  .p-opt{color:#fff;border-radius:18px;padding:26px 22px;font-size:clamp(20px,2.4vw,30px);font-weight:800;display:flex;align-items:center;gap:16px}
+  .p-timer{font-size:clamp(48px,7vw,90px);font-weight:900;line-height:1}
+  .p-count{font-size:18px;color:var(--lav)}
+  .p-name-grid{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;max-width:900px;margin-top:18px}
+  .p-name{background:rgba(255,122,24,.2);border:1px solid var(--panel-border);border-radius:999px;padding:10px 18px;font-size:20px;font-weight:700}
+  .p-lb{width:100%;max-width:640px;margin-top:20px}
+  .p-lb .lb-item{font-size:22px;padding:12px 18px}
 </style>
 </head>
 <body>
-<div id="app" class="center" style="width:100%"><p style="margin-top:40px">Loading… 🕸️</p></div>
+<div id="app" class="center"><p style="margin-top:40px">Loading… 🕸️</p></div>
 
-<!-- Firebase (compat build = no bundler needed) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
 <script>
 /* ============================================================
-   1) PASTE YOUR FIREBASE CONFIG BELOW
-   Replace every "PASTE_..." value with the values Firebase
-   gives you (Project settings → Your apps → SDK setup).
+   FIREBASE CONFIG — already filled in for this project.
    ============================================================ */
 const firebaseConfig = {
   apiKey: "AIzaSyALF5Ljuwm5d02rp_3xTUuT8eegmSzdPw0",
@@ -64,13 +73,12 @@ const firebaseConfig = {
   messagingSenderId: "778986819806",
   appId: "1:778986819806:web:0c15189ffd965d2734724f"
 };
-/* ============================================================
-   2) OPTIONAL: change the game room name. Everyone in the same
-   room plays together. Use a new name to start a fresh game.
-   ============================================================ */
 const ROOM = "halloween-2026";
 
-// ---- constants ----
+// PRESENTER MODE: open the site with ?host at the end of the URL
+// e.g. https://halloween-trivia-roan.vercel.app/?host
+const IS_HOST = new URLSearchParams(location.search).has("host");
+
 const QUESTION_TIME = 20, REVEAL_TIME = 6, MAX_POINTS = 1000;
 const COLORS = ["#e0245e","#1d9bf0","#f5a623","#17bf63"];
 const SHAPES = ["▲","◆","●","■"];
@@ -118,7 +126,6 @@ const QUESTIONS = [
   {round:"🎬 Round 4 — Movies & Pop Culture",clue:"Wednesday Addams' brother's name?",options:["Gomez","Fester","Pugsley","Thing"],answer:2},
 ];
 
-// ---- init firebase ----
 let db, gameRef, playersRef, ready=false;
 try {
   firebase.initializeApp(firebaseConfig);
@@ -128,27 +135,23 @@ try {
   ready = true;
 } catch(e){ console.error(e); }
 
-// ---- local state ----
-let me = { id:"", name:"", isHost:false };
-let game = null;           // {phase,qIndex,phaseStart}
-let players = {};          // id -> {name,score,isHost,answers}
-let myAnswer = null;       // {choice}
-let screen = "join";
+let me = { id:"", name:"" };
+let game = null;
+let players = {};
+let myAnswer = null;
+let screen = IS_HOST ? "host" : "join";
 const app = document.getElementById("app");
 const nowMs = () => Date.now();
 
-// ---- firestore listeners ----
 function subscribe(){
   gameRef.onSnapshot(d=>{ game = d.exists ? d.data() : null; render(); });
-  playersRef.onSnapshot(s=>{
-    players = {}; s.forEach(doc=> players[doc.id]=doc.data()); render();
-  });
+  playersRef.onSnapshot(s=>{ players = {}; s.forEach(doc=> players[doc.id]=doc.data()); render(); });
 }
 
-// ---- host loop (only host advances the clock) ----
+// Presenter drives the clock
 setInterval(()=>{
-  render(); // keep timer ticking
-  if(!me.isHost || !game) return;
+  render();
+  if(!IS_HOST || !game) return;
   if(game.phase==="lobby" || game.phase==="ended") return;
   const el = (nowMs() - game.phaseStart)/1000;
   if(game.phase==="question" && el>=QUESTION_TIME){
@@ -161,18 +164,18 @@ setInterval(()=>{
 },250);
 
 // ---- actions ----
+async function ensureGameDoc(){
+  const g = await gameRef.get();
+  if(!g.exists) await gameRef.set({phase:"lobby",qIndex:0,phaseStart:nowMs()});
+}
 async function joinGame(){
-  const name = document.getElementById("nick").value.trim();
+  const el = document.getElementById("nick");
+  const name = el.value.trim();
   if(!name) return;
   me.id = "p_"+Math.random().toString(36).slice(2,9);
   me.name = name;
-  const snap = await playersRef.get();
-  me.isHost = snap.empty;
-  await playersRef.doc(me.id).set({name,score:0,isHost:me.isHost,answers:{}});
-  const g = await gameRef.get();
-  if(me.isHost && !g.exists){
-    await gameRef.set({phase:"lobby",qIndex:0,phaseStart:nowMs()});
-  }
+  await ensureGameDoc();
+  await playersRef.doc(me.id).set({name,score:0,answers:{}});
   screen="lobby"; render();
 }
 async function startGame(){ await gameRef.update({phase:"question",qIndex:0,phaseStart:nowMs()}); }
@@ -195,11 +198,10 @@ async function resetGame(){
   snap.forEach(d=>batch.delete(d.ref));
   await batch.commit();
   await gameRef.set({phase:"lobby",qIndex:0,phaseStart:nowMs()});
-  me={id:"",name:"",isHost:false}; myAnswer=null; screen="join"; render();
+  myAnswer=null; render();
 }
 
-// reset myAnswer on new question
-let lastQ = -1, lastPhase="";
+let lastQ = -1;
 function syncAnswerState(){
   if(game && game.phase==="question" && game.qIndex!==lastQ){
     lastQ = game.qIndex;
@@ -208,15 +210,99 @@ function syncAnswerState(){
   }
 }
 
-// ---- render ----
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 function sorted(){return Object.entries(players).map(([id,v])=>({id,...v})).sort((a,b)=>(b.score||0)-(a.score||0));}
+function answeredCount(qi){return Object.values(players).filter(p=>p.answers && p.answers[qi]!==undefined).length;}
 
+// ============ RENDER ============
 function render(){
-  if(!ready){ app.innerHTML = `<div class="card"><p style="color:#e0245e">⚠️ Firebase isn't configured yet. Paste your config into index.html.</p></div>`; return; }
+  if(!ready){ app.innerHTML = `<div class="card"><p style="color:#e0245e">⚠️ Firebase isn't configured.</p></div>`; return; }
   syncAnswerState();
+  if(IS_HOST){ renderHost(); return; }
+  renderPlayer();
+}
 
-  // decide screen from game phase
+// ---------- PRESENTER (big screen) ----------
+function renderHost(){
+  const count = Object.keys(players).length;
+
+  if(!game || game.phase==="lobby"){
+    const names = sorted().map(p=>`<span class="p-name">🎃 ${esc(p.name)}</span>`).join("");
+    app.innerHTML = `
+      <div class="p-wrap center">
+        <div style="font-size:70px;margin-top:10px">🎃</div>
+        <h1 style="font-size:44px">Halloween Trivia</h1>
+        <p class="sub" style="font-size:20px">Scan the QR code, pick a nickname, and join on your phone.</p>
+        <div style="margin-top:10px;font-size:22px;color:var(--amber);font-weight:800">Players in: ${count}</div>
+        <div class="p-name-grid">${names||'<span class="sub">Waiting for players…</span>'}</div>
+        <button class="btn" style="background:var(--green);max-width:420px;font-size:22px;margin-top:26px" onclick="startGame()">
+          Start Game (${QUESTIONS.length} questions)
+        </button>
+        <p class="note">Start whenever everyone's in. New players can join right up until you press Start.</p>
+      </div>`;
+    return;
+  }
+
+  const q = QUESTIONS[game.qIndex];
+  const elapsed = (nowMs()-game.phaseStart)/1000;
+
+  if(game.phase==="question"){
+    const remaining = Math.max(0,Math.ceil(QUESTION_TIME-elapsed));
+    const pct=(remaining/QUESTION_TIME)*100;
+    app.innerHTML = `
+      <div class="p-wrap center">
+        <div class="row"><span class="tag">${esc(q.round)}</span><span class="tag">Question ${game.qIndex+1} of ${QUESTIONS.length}</span></div>
+        <div class="bar"><div class="fill" style="width:${pct}%;background:${remaining<=5?'var(--red)':'var(--green)'}"></div></div>
+        <div style="display:flex;align-items:center;gap:24px;margin-top:14px">
+          <div class="p-timer" style="color:${remaining<=5?'var(--red)':'#fff'}">${remaining}</div>
+          <div class="p-count">✋ ${answeredCount(game.qIndex)} / ${count} answered</div>
+        </div>
+        <div class="p-clue">${esc(q.clue)}</div>
+        <div class="p-grid">
+          ${q.options.map((o,i)=>`<div class="p-opt" style="background:${COLORS[i]}"><span>${SHAPES[i]}</span>${esc(o)}</div>`).join("")}
+        </div>
+        <p class="note">Answer on your phone — match the shape &amp; color.</p>
+      </div>`;
+    return;
+  }
+
+  if(game.phase==="reveal"){
+    const lb = sorted().slice(0,10).map((p,i)=>`<div class="lb-item"><span>${["🥇","🥈","🥉"][i]||(i+1)+"."} ${esc(p.name)}</span><span style="font-weight:800">${p.score||0}</span></div>`).join("");
+    app.innerHTML = `
+      <div class="p-wrap center">
+        <span class="tag">Question ${game.qIndex+1} of ${QUESTIONS.length}</span>
+        <div style="background:rgba(23,191,99,.15);border:3px solid var(--green);border-radius:18px;padding:20px 34px;margin-top:12px;text-align:center">
+          <div style="font-size:16px;color:#8affc0">Correct answer</div>
+          <div style="font-size:clamp(26px,3.4vw,40px);font-weight:900">${SHAPES[q.answer]} ${esc(q.options[q.answer])}</div>
+        </div>
+        <div class="p-lb">
+          <div style="font-size:18px;color:var(--amber);font-weight:800;margin-bottom:8px">🏆 Leaderboard</div>${lb}
+        </div>
+      </div>`;
+    return;
+  }
+
+  if(game.phase==="ended"){
+    const titles=["🥇 The Halloween Mastermind","🥈 The Spooky Scholar","🥉 The Pumpkin Professor"];
+    const rows = sorted().map((p,i)=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 22px;border-radius:14px;margin-bottom:8px;background:${i<3?'rgba(255,122,24,.2)':'rgba(255,255,255,.05)'}">
+        <div><div style="font-size:20px;font-weight:800">${titles[i]||((i+1)+". "+esc(p.name))}</div>${titles[i]?`<div style="font-size:15px;color:var(--lav)">${esc(p.name)}</div>`:""}</div>
+        <span style="font-size:24px;font-weight:900;color:var(--amber)">${p.score||0}</span>
+      </div>`).join("");
+    app.innerHTML = `
+      <div class="p-wrap center">
+        <div style="font-size:64px;margin-top:14px">🏆</div>
+        <h1>Final Results</h1>
+        <div style="width:100%;max-width:640px;margin-top:12px">${rows}</div>
+        <button class="btn" style="background:var(--red);max-width:420px" onclick="resetGame()">Reset for a New Game</button>
+        <p class="note">Happy Halloween! 🎃👻</p>
+      </div>`;
+    return;
+  }
+}
+
+// ---------- PLAYER (phone) ----------
+function renderPlayer(){
   if(game){
     if((game.phase==="question"||game.phase==="reveal") && screen==="lobby") screen="play";
     if(game.phase==="ended") screen="end";
@@ -224,98 +310,92 @@ function render(){
   }
 
   if(screen==="join"){
-    // Don't rebuild the join screen if it's already showing — that would
-    // wipe whatever the user is typing in the nickname box on every poll.
-    if(document.getElementById("nick")) return;
+    if(document.getElementById("nick")) return; // don't wipe typing
     app.innerHTML = `
       <div style="font-size:64px;margin-top:30px">🎃</div>
       <h1>Halloween Trivia</h1>
-      <p class="sub">Spooky Team Challenge · buzzer-style</p>
+      <p class="sub">Enter a nickname to join</p>
       <div class="card">
-        <label for="nick">Enter your nickname</label>
+        <label for="nick">Your nickname</label>
         <input id="nick" maxlength="20" placeholder="e.g. Resting Witch Face" />
         <button class="btn" style="background:var(--pumpkin)" onclick="joinGame()">Join Game 👻</button>
       </div>
-      <p class="note">Everyone opens this same link to join. The first player to join hosts the game and starts it.</p>`;
+      <p class="note">Watch the big screen for questions. Answer here on your phone.</p>`;
     const i=document.getElementById("nick"); if(i){i.focus(); i.onkeydown=e=>{if(e.key==="Enter")joinGame();};}
     return;
   }
 
   if(screen==="lobby"){
-    const list = sorted().map(p=>`<div class="lb-item ${p.id===me.id?'lb-me':''}"><span>${p.isHost?'👑 ':'🎃 '}${esc(p.name)}</span>${p.id===me.id?'<span style="color:var(--amber);font-size:12px">you</span>':''}</div>`).join("");
     app.innerHTML = `
-      <div style="font-size:48px;margin-top:20px">🕸️</div>
-      <h1 style="font-size:26px">Lobby</h1>
-      <p class="sub">${me.isHost?"You're the host.":"Waiting for the host to start…"}</p>
-      <div class="card">
-        <div style="font-size:13px;color:var(--amber);font-weight:700;margin-bottom:8px">Players joined (${sorted().length})</div>
-        ${list||'<p class="sub">No one yet…</p>'}
-      </div>
-      ${me.isHost?`<button class="btn" style="background:var(--green);max-width:400px" onclick="startGame()">Start Game (${QUESTIONS.length} questions)</button>`:""}
-      <p class="note">New players can still join until the game starts.</p>`;
+      <div style="font-size:48px;margin-top:30px">🕸️</div>
+      <h1 style="font-size:26px">You're in!</h1>
+      <p class="sub">${esc(me.name)} — watch the big screen.<br>The game starts when the host is ready.</p>
+      <div class="card center"><div style="font-size:15px;color:var(--amber)">Waiting for the game to start…</div></div>`;
     return;
   }
 
   if(screen==="play" && game){
     const q = QUESTIONS[game.qIndex];
-    const el = (nowMs()-game.phaseStart)/1000;
+    const elapsed = (nowMs()-game.phaseStart)/1000;
 
     if(game.phase==="question"){
-      const remaining = Math.max(0,Math.ceil(QUESTION_TIME-el));
-      const pct = (remaining/QUESTION_TIME)*100;
-      const answered = !!myAnswer;
+      const remaining = Math.max(0,Math.ceil(QUESTION_TIME-elapsed));
+      if(myAnswer){
+        app.innerHTML = `
+          <div style="font-size:40px;margin-top:40px">🔒</div>
+          <h1 style="font-size:24px">Locked in!</h1>
+          <p class="sub">Look up at the screen.<br>Time left: ${remaining}s</p>`;
+        return;
+      }
       app.innerHTML = `
-        <div class="row" style="margin-top:8px"><span class="tag">${esc(q.round)}</span><span class="tag">Q${game.qIndex+1}/${QUESTIONS.length}</span></div>
-        <div class="bar"><div class="fill" style="width:${pct}%;background:${remaining<=5?'var(--red)':'var(--green)'}"></div></div>
-        <div class="timer" style="color:${remaining<=5?'var(--red)':'#fff'}">${remaining}</div>
-        <div class="clue" style="font-size:${q.big?'40px':'22px'}">${esc(q.clue)}</div>
-        ${answered
-          ? `<div style="margin-top:24px;font-size:20px;color:var(--amber);text-align:center">🔒 Answer locked in!<br><span style="font-size:14px;color:var(--lav)">Waiting for the timer…</span></div>`
-          : `<div class="grid">${q.options.map((o,i)=>`<button class="opt" style="background:${COLORS[i]}" onclick="submitAnswer(${i})"><span style="font-size:20px">${SHAPES[i]}</span>${esc(o)}</button>`).join("")}</div>`}`;
+        <p class="sub" style="margin-top:20px">Tap your answer 👇</p>
+        <div class="grid" style="margin-top:8px">
+          ${q.options.map((o,i)=>`<button class="opt" style="background:${COLORS[i]};justify-content:center;font-size:34px;padding:34px 14px" onclick="submitAnswer(${i})">${SHAPES[i]}</button>`).join("")}
+        </div>
+        <p class="note">Match the shape &amp; color to your choice on the big screen.</p>`;
       return;
     }
 
     if(game.phase==="reveal"){
       const mine = players[me.id]?.answers?.[game.qIndex];
-      const head = mine ? (mine.correct?"✅ Correct!":"❌ Not quite") : "⏰ Time's up";
-      const lb = sorted().slice(0,8).map((p,i)=>`<div class="lb-item ${p.id===me.id?'lb-me':''}"><span>${["🥇","🥈","🥉"][i]||(i+1)+"."} ${esc(p.name)}</span><span style="font-weight:700">${p.score||0}</span></div>`).join("");
+      const head = mine ? (mine.correct?"✅ Correct!":"❌ Not quite") : "⏰ Missed it";
+      const myScore = players[me.id]?.score||0;
+      const rank = sorted().findIndex(p=>p.id===me.id)+1;
       app.innerHTML = `
-        <span class="tag" style="margin-top:8px">Q${game.qIndex+1}/${QUESTIONS.length}</span>
-        <div style="font-size:30px;margin:12px 0;text-align:center;font-weight:800">${head}</div>
-        ${mine&&mine.correct?`<div style="color:var(--green);font-size:22px;font-weight:700">+${mine.earned} pts</div>`:""}
-        <div style="background:rgba(23,191,99,.15);border:2px solid var(--green);border-radius:14px;padding:14px 20px;margin-top:14px;max-width:560px;text-align:center">
-          <span style="font-size:13px;color:#8affc0">Answer</span><br><span style="font-size:22px;font-weight:800">${SHAPES[q.answer]} ${esc(q.options[q.answer])}</span>
+        <div style="font-size:30px;margin:40px 0 8px;text-align:center;font-weight:800">${head}</div>
+        ${mine&&mine.correct?`<div style="color:var(--green);font-size:24px;font-weight:800">+${mine.earned} pts</div>`:""}
+        <div class="card center">
+          <div style="font-size:15px;color:var(--lav)">Your score</div>
+          <div style="font-size:34px;font-weight:900;color:var(--amber)">${myScore}</div>
+          <div style="font-size:14px;color:var(--lav);margin-top:4px">Rank #${rank} of ${Object.keys(players).length}</div>
         </div>
-        <div style="width:100%;max-width:420px;margin-top:24px">
-          <div style="font-size:13px;color:var(--amber);font-weight:700;margin-bottom:8px">🏆 Leaderboard</div>${lb}
-        </div>`;
+        <p class="note">Look up at the screen for the leaderboard.</p>`;
       return;
     }
   }
 
   if(screen==="end"){
-    const titles=["🥇 The Halloween Mastermind","🥈 The Spooky Scholar","🥉 The Pumpkin Professor"];
-    const rows = sorted().map((p,i)=>`
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-radius:14px;margin-bottom:8px;background:${i<3?'rgba(255,122,24,.2)':'rgba(255,255,255,.05)'};border:${p.id===me.id?'2px solid var(--pumpkin)':'2px solid transparent'}">
-        <div><div style="font-size:16px;font-weight:700">${titles[i]||((i+1)+". "+esc(p.name))}</div>${titles[i]?`<div style="font-size:13px;color:var(--lav)">${esc(p.name)}</div>`:""}</div>
-        <span style="font-size:20px;font-weight:800;color:var(--amber)">${p.score||0}</span>
-      </div>`).join("");
+    const myScore = players[me.id]?.score||0;
+    const rank = sorted().findIndex(p=>p.id===me.id)+1;
     app.innerHTML = `
-      <div style="font-size:60px;margin-top:20px">🏆</div>
-      <h1>Final Results</h1>
-      <div style="width:100%;max-width:440px;margin-top:12px">${rows}</div>
-      ${me.isHost?`<button class="btn" style="background:var(--red);max-width:440px" onclick="resetGame()">Reset for a New Game</button>`:""}
-      <p class="note">Happy Halloween! 🎃👻</p>`;
+      <div style="font-size:60px;margin-top:30px">🏆</div>
+      <h1>Game Over!</h1>
+      <div class="card center">
+        <div style="font-size:15px;color:var(--lav)">Final score</div>
+        <div style="font-size:38px;font-weight:900;color:var(--amber)">${myScore}</div>
+        <div style="font-size:15px;color:var(--lav);margin-top:4px">You placed #${rank} of ${Object.keys(players).length}</div>
+      </div>
+      <p class="note">Winners are on the big screen. Happy Halloween! 🎃</p>`;
     return;
   }
 
   app.innerHTML = `<p style="margin-top:40px">Loading… 🕸️</p>`;
 }
 
-// expose handlers + go
 window.joinGame=joinGame; window.startGame=startGame; window.submitAnswer=submitAnswer; window.resetGame=resetGame;
 if(ready){ subscribe(); } render();
 </script>
 </body>
 </html>
+
 
