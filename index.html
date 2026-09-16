@@ -159,18 +159,39 @@ try {
 } catch(e){ console.error(e); }
 
 let me = { id:"", name:"" };
+// Restore identity after a refresh so the player rejoins as the SAME person
+// instead of being kicked to the join screen and creating a duplicate.
+if(!IS_HOST){
+  try{
+    const saved = JSON.parse(localStorage.getItem("htrivia_me")||"null");
+    if(saved && saved.id && saved.name && saved.room===ROOM){ me = {id:saved.id, name:saved.name}; }
+  }catch(e){}
+}
 let game = null;
 let players = {};
 let myAnswer = null;
-let screen = IS_HOST ? "host" : "join";
+let screen = (!IS_HOST && me.id) ? "lobby" : (IS_HOST ? "host" : "join");
 let playerQDrawn = -1; // which question index currently has buttons drawn on the phone
 const app = document.getElementById("app");
 const nowMs = () => Date.now();
 
 function subscribe(){
   gameRef.onSnapshot(d=>{ game = d.exists ? d.data() : null; render(); });
-  playersRef.onSnapshot(s=>{ players = {}; s.forEach(doc=> players[doc.id]=doc.data()); render(); });
+  playersRef.onSnapshot(s=>{
+    players = {}; s.forEach(doc=> players[doc.id]=doc.data());
+    // If we restored an identity from a refresh but our player record is gone
+    // (e.g. the host reset the room), re-create it once so we're not stuck.
+    if(!IS_HOST && me.id && !players[me.id] && !recreating){
+      recreating = true;
+      const av = Object.keys(players).length;
+      playersRef.doc(me.id).set({name:me.name,score:0,answers:{},av})
+        .catch(e=>console.error(e))
+        .finally(()=>{ recreating=false; });
+    }
+    render();
+  });
 }
+let recreating = false;
 
 // Presenter drives the clock
 setInterval(()=>{
@@ -207,6 +228,7 @@ async function joinGame(){
   const snap = await playersRef.get();
   const av = snap.size;
   await playersRef.doc(me.id).set({name,score:0,answers:{},av});
+  try{ localStorage.setItem("htrivia_me", JSON.stringify({id:me.id,name:me.name,room:ROOM})); }catch(e){}
   screen="lobby"; render();
 }
 async function startGame(){ await gameRef.update({phase:"question",qIndex:0,phaseStart:nowMs()}); }
@@ -243,6 +265,7 @@ let lastQ = -1;
 function syncAnswerState(){
   if(game && game.phase==="question" && game.qIndex!==lastQ){
     lastQ = game.qIndex;
+    playerQDrawn = -1; // force fresh button draw for the new question
     const ex = players[me.id]?.answers?.[game.qIndex];
     myAnswer = ex ? {choice:ex.choice} : null;
   }
@@ -283,6 +306,7 @@ function ensureHostResetButton(){
 
 // ---------- PRESENTER (big screen) ----------
 let lastLobbySig="";
+let lastRevealSig="";
 function renderHost(){
   const count = Object.keys(players).length;
 
@@ -318,6 +342,7 @@ function renderHost(){
   lastLobbySig=""; // so lobby rebuilds fresh if we reset back to it later
 
   if(game.phase==="question"){
+    lastRevealSig=""; // reveal will rebuild fresh next time
     const remaining = Math.max(0,Math.ceil(QUESTION_TIME-elapsed));
     const pct=(remaining/QUESTION_TIME)*100;
     app.innerHTML = `
@@ -340,6 +365,11 @@ function renderHost(){
   }
 
   if(game.phase==="reveal"){
+    // Only build once per question — the reveal screen is static until the host
+    // advances, so rebuilding every tick would eat clicks on the Next button.
+    const sig = "reveal|"+game.qIndex+"|"+sorted().map(p=>p.name+p.score).join(",");
+    if(sig===lastRevealSig) return;
+    lastRevealSig = sig;
     const lb = sorted().slice(0,10).map((p,i)=>`<div class="lb-item"><span style="display:inline-flex;align-items:center;gap:10px">${["🥇","🥈","🥉"][i]||`<span style="width:24px;display:inline-block;text-align:center">${i+1}.</span>`} ${avatarHTML(p.av??0,32)} ${esc(p.name)}</span><span style="font-weight:800">${p.score||0}</span></div>`).join("");
     app.innerHTML = `
       <div class="p-wrap center">
@@ -434,7 +464,10 @@ function renderPlayer(){
       // Build the buttons ONCE per question. On later ticks, only update the
       // countdown text — never rebuild the buttons, or a tap landing during a
       // rebuild gets discarded (that's the "had to tap several times" bug).
-      if(playerQDrawn !== game.qIndex){
+      // But if the buttons somehow aren't on screen (transition/refresh), force
+      // a rebuild so the player never gets stuck with no options.
+      const buttonsPresent = document.getElementById("pcount") && document.querySelector(".grid .opt");
+      if(playerQDrawn !== game.qIndex || !buttonsPresent){
         playerQDrawn = game.qIndex;
         app.innerHTML = `
           <p class="sub" style="margin-top:20px">Tap your answer 👇 &nbsp;·&nbsp; <span id="pcount">${remaining}</span>s left</p>
