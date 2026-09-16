@@ -82,7 +82,7 @@ const ROOM = "halloween-2026";
 // e.g. https://halloween-trivia-roan.vercel.app/?host
 const IS_HOST = new URLSearchParams(location.search).has("host");
 
-const QUESTION_TIME = 30, REVEAL_TIME = 7, MAX_POINTS = 1000;
+const QUESTION_TIME = 15, REVEAL_TIME = 7, MAX_POINTS = 1000;
 const COLORS = ["#e0245e","#1d9bf0","#f5a623","#17bf63"];
 const SHAPES = ["▲","◆","●","■"];
 
@@ -163,6 +163,7 @@ let game = null;
 let players = {};
 let myAnswer = null;
 let screen = IS_HOST ? "host" : "join";
+let playerQDrawn = -1; // which question index currently has buttons drawn on the phone
 const app = document.getElementById("app");
 const nowMs = () => Date.now();
 
@@ -179,12 +180,16 @@ setInterval(()=>{
   const el = (nowMs() - game.phaseStart)/1000;
   if(game.phase==="question" && el>=QUESTION_TIME){
     gameRef.update({phase:"reveal",phaseStart:nowMs()});
-  } else if(game.phase==="reveal" && el>=REVEAL_TIME){
-    const next = game.qIndex+1;
-    if(next>=QUESTIONS.length) gameRef.update({phase:"ended",phaseStart:nowMs()});
-    else gameRef.update({phase:"question",qIndex:next,phaseStart:nowMs()});
   }
+  // reveal → next is now manual (host taps "Next question"); no auto-advance.
 },250);
+
+async function nextQuestion(){
+  if(!game) return;
+  const next = game.qIndex+1;
+  if(next>=QUESTIONS.length) await gameRef.update({phase:"ended",phaseStart:nowMs()});
+  else await gameRef.update({phase:"question",qIndex:next,phaseStart:nowMs()});
+}
 
 // ---- actions ----
 async function ensureGameDoc(){
@@ -346,6 +351,9 @@ function renderHost(){
         <div class="p-lb">
           <div style="font-size:18px;color:var(--amber);font-weight:800;margin-bottom:8px">🏆 Leaderboard</div>${lb}
         </div>
+        <button class="btn" style="background:var(--green);max-width:420px;font-size:20px;margin-top:20px" onclick="nextQuestion()">
+          ${game.qIndex+1>=QUESTIONS.length ? "See Final Results 🏆" : "Next Question ▶"}
+        </button>
         <p class="note"><span style="cursor:pointer;text-decoration:underline" onclick="resetGame(true)">Reset game</span></p>
       </div>`;
     return;
@@ -420,16 +428,24 @@ function renderPlayer(){
           <div style="font-size:40px;margin-top:40px">🔒</div>
           <h1 style="font-size:24px">Locked in!</h1>
           <p class="sub">Look up at the screen.<br>Time left: ${remaining}s</p>`;
+        playerQDrawn = -1;
         return;
       }
-      // Buttons show the whole time the phase is "question", regardless of this
-      // phone's clock — so a slow phone still gets a fair chance to answer.
-      app.innerHTML = `
-        <p class="sub" style="margin-top:20px">Tap your answer 👇 &nbsp;·&nbsp; ${remaining}s left</p>
-        <div class="grid" style="margin-top:8px">
-          ${q.options.map((o,i)=>`<button class="opt" style="background:${COLORS[i]};font-size:16px;padding:20px 12px;line-height:1.2" onclick="submitAnswer(${i})"><span style="font-size:22px">${SHAPES[i]}</span>${esc(o)}</button>`).join("")}
-        </div>
-        <p class="note">${q.img?"Look up at the screen for the picture.":"Match the shape &amp; color to the big screen."}</p>`;
+      // Build the buttons ONCE per question. On later ticks, only update the
+      // countdown text — never rebuild the buttons, or a tap landing during a
+      // rebuild gets discarded (that's the "had to tap several times" bug).
+      if(playerQDrawn !== game.qIndex){
+        playerQDrawn = game.qIndex;
+        app.innerHTML = `
+          <p class="sub" style="margin-top:20px">Tap your answer 👇 &nbsp;·&nbsp; <span id="pcount">${remaining}</span>s left</p>
+          <div class="grid" style="margin-top:8px">
+            ${q.options.map((o,i)=>`<button class="opt" style="background:${COLORS[i]};font-size:16px;padding:20px 12px;line-height:1.2" onclick="submitAnswer(${i})"><span style="font-size:22px">${SHAPES[i]}</span>${esc(o)}</button>`).join("")}
+          </div>
+          <p class="note">${q.img?"Look up at the screen for the picture.":"Match the shape &amp; color to the big screen."}</p>`;
+      } else {
+        const c = document.getElementById("pcount");
+        if(c) c.textContent = remaining;
+      }
       return;
     }
 
@@ -469,7 +485,7 @@ function renderPlayer(){
   app.innerHTML = `<p style="margin-top:40px">Loading… 🕸️</p>`;
 }
 
-window.joinGame=joinGame; window.startGame=startGame; window.submitAnswer=submitAnswer; window.resetGame=resetGame;
+window.joinGame=joinGame; window.startGame=startGame; window.submitAnswer=submitAnswer; window.resetGame=resetGame; window.nextQuestion=nextQuestion;
 if(ready){ subscribe(); } render();
 </script>
 </body>
