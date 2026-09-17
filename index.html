@@ -77,6 +77,10 @@ const firebaseConfig = {
   appId: "1:778986819806:web:0c15189ffd965d2734724f"
 };
 const ROOM = "halloween-2026";
+// Build stamp — bump this whenever you upload a new version. The host writes it
+// into the game; a player on a different (stale/cached) build is told to refresh
+// instead of being shown mismatched questions.
+const BUILD = "2026-10-31-r2hard";
 
 // PRESENTER MODE: open the site with ?host at the end of the URL
 // e.g. https://halloween-trivia-roan.vercel.app/?host
@@ -260,7 +264,7 @@ async function joinGame(){
   try{ localStorage.setItem("htrivia_me", JSON.stringify({id:me.id,name:me.name,room:ROOM})); }catch(e){}
   screen="lobby"; render();
 }
-async function startGame(){ await gameRef.update({phase:"intro",qIndex:0,phaseStart:nowMs()}); }
+async function startGame(){ await gameRef.update({phase:"intro",qIndex:0,phaseStart:nowMs(),build:BUILD}); }
 async function submitAnswer(choice){
   if(myAnswer) return;
   if(!game || game.phase!=="question") return;
@@ -456,6 +460,16 @@ function renderHost(){
 
 // ---------- PLAYER (phone) ----------
 function renderPlayer(){
+  // If this phone is running an older cached build than the host started the
+  // game with, its question list won't match the screen. Tell them to refresh
+  // rather than showing mismatched options.
+  if(game && game.build && game.build!==BUILD){
+    app.innerHTML = `
+      <div style="font-size:52px;margin-top:50px">🔄</div>
+      <h1 style="font-size:24px">Please refresh</h1>
+      <p class="sub">This page is out of date.<br>Pull down to refresh (or close and reopen the link) to rejoin.</p>`;
+    return;
+  }
   if(game){
     if(game.phase==="intro"){ screen="intro"; }
     else if((game.phase==="question"||game.phase==="reveal") && (screen==="lobby"||screen==="intro")) screen="play";
